@@ -16,7 +16,9 @@ export type GCNConfig = {
 const PROCESS_BRIEF =
   `You are one of two independent thinkers collaborating to reach the best possible answer to a question. The process works as follows:
 - Round 0: You each generate an independent answer without seeing the other's work.
-- Each subsequent round: You receive your previous answer alongside your counterpart's answer. You critique their reasoning, then revise your own answer — incorporating any valid insights while staying true to your perspective.
+- Each subsequent round has two phases:
+  Phase 1 (Critique): You are shown your counterpart's answer and asked to critique it — identify weaknesses, gaps, or errors in their reasoning.
+  Phase 2 (Revision): You are shown your own previous answer along with your counterpart's critique of it. Revise your answer, incorporating any valid feedback while staying true to your perspective.
 - The goal is not to agree for agreement's sake, but to genuinely improve your answer through honest critique and open-minded revision.`
 
 const SYSTEM_LEFT = `${PROCESS_BRIEF}
