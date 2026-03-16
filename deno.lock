@@ -8,6 +8,7 @@
     "npm:hono@4": "4.8.5",
     "npm:react-dom@^19.2.4": "19.2.4_react@19.2.4",
     "npm:react@^19.2.4": "19.2.4",
+    "npm:vite@*": "7.3.1_picomatch@4.0.3",
     "npm:vite@^7.3.1": "7.3.1_picomatch@4.0.3"
   },
   "npm": {
