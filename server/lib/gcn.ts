@@ -73,6 +73,8 @@ export function runGCN(session: GCNSession, question: string) {
   const maxTokens = 1024
   const temperature = 0.8
 
+  const signal = session.abortController.signal
+
   return Try(async () => {
     // Round 0: independent first pass
     pushEvent(session, 'left', { type: 'round_start', iteration: 0 })
@@ -85,6 +87,7 @@ export function runGCN(session: GCNSession, question: string) {
           messages: [{ role: 'system', content: SYSTEM_LEFT }, ...initialMessages(question)],
           maxTokens,
           temperature,
+          signal,
         },
         (token) => pushEvent(session, 'left', { type: 'token', content: token }),
       ),
@@ -94,6 +97,7 @@ export function runGCN(session: GCNSession, question: string) {
           messages: [{ role: 'system', content: SYSTEM_RIGHT }, ...initialMessages(question)],
           maxTokens,
           temperature,
+          signal,
         },
         (token) => pushEvent(session, 'right', { type: 'token', content: token }),
       ),
@@ -124,6 +128,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens: CRITIQUE_TOKENS,
             temperature,
+            signal,
           },
           (token) => pushEvent(session, 'left', { type: 'token', content: token }),
         ),
@@ -136,6 +141,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens: CRITIQUE_TOKENS,
             temperature,
+            signal,
           },
           (token) => pushEvent(session, 'right', { type: 'token', content: token }),
         ),
@@ -158,6 +164,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens: revisionTokens,
             temperature,
+            signal,
           },
           (token) => pushEvent(session, 'left', { type: 'token', content: token }),
         ),
@@ -170,6 +177,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens: revisionTokens,
             temperature,
+            signal,
           },
           (token) => pushEvent(session, 'right', { type: 'token', content: token }),
         ),
@@ -193,6 +201,7 @@ export function runGCN(session: GCNSession, question: string) {
         ],
         maxTokens: 10,
         temperature: 0,
+        signal,
       })
 
       if (!check.success) throw new Error(`Judge API failure: ${check.error}`)
@@ -227,6 +236,7 @@ export function runGCN(session: GCNSession, question: string) {
       ],
       maxTokens,
       temperature: 0.3,
+      signal,
     })
 
     const finalAnswer = synthResult.success ? synthResult.data : 'Synthesis failed.'

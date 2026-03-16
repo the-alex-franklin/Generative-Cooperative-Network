@@ -82,19 +82,19 @@ function ChatPanel({ title, state }: { title: string; state: PanelState }) {
   }, [lastContent])
 
   return (
-    <div className='flex flex-1 flex-col overflow-hidden rounded-sm border border-[#1e1e1e]'>
-      <div className='border-b border-[#1e1e1e] bg-[#141414] px-3 py-1.5 font-mono text-[11px] tracking-[0.08em] text-[#666] uppercase'>
+    <div className='flex flex-1 flex-col overflow-hidden rounded-sm border border-[#6b3fa8]'>
+      <div className='border-b border-[#6b3fa8] bg-[#3d2075] px-4 py-2 font-mono text-[11px] tracking-[0.08em] text-[#a87fd4] uppercase'>
         {title}
       </div>
-      <div ref={bodyRef} className='flex flex-1 flex-col gap-4 overflow-y-auto p-3'>
+      <div ref={bodyRef} className='flex flex-1 flex-col gap-5 overflow-y-auto p-4'>
         {state.rounds.map((round, i) => (
           <div key={i} className='animate-fade-in'>
-            <div className='mb-1 font-mono text-[10px] tracking-[0.12em] text-[#444] uppercase'>
+            <div className='mb-1 font-mono text-[10px] tracking-[0.12em] text-[#9b7fc7] uppercase'>
               {roundLabel(round)}
             </div>
             <div className='font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words text-[#ccc]'>
               {round.content}
-              {!round.complete && <span className='animate-blink text-[#666]'>▊</span>}
+              {!round.complete && <span className='animate-blink text-[#a87fd4]'>▊</span>}
             </div>
           </div>
         ))}
@@ -108,6 +108,7 @@ export default function App() {
   const [question, setQuestion] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [left, setLeft] = useState<PanelState>(emptyPanel())
   const [right, setRight] = useState<PanelState>(emptyPanel())
   const [finalAnswer, setFinalAnswer] = useState<string | null>(null)
@@ -128,6 +129,13 @@ export default function App() {
     const { sessionId: sid } = await res.json()
     setSessionId(sid)
     setLoading(false)
+    setStreaming(true)
+  }
+
+  const handleAbort = async () => {
+    if (!sessionId) return
+    await fetch(`/api/gcn/abort/${sessionId}`, { method: 'POST' })
+    setStreaming(false)
   }
 
   useEffect(() => {
@@ -136,12 +144,18 @@ export default function App() {
     const leftEs = new EventSource(`/api/gcn/stream/left/${sessionId}`)
     const rightEs = new EventSource(`/api/gcn/stream/right/${sessionId}`)
 
+    const onDone = () => {
+      if (!leftEs.CLOSED && !rightEs.CLOSED) return
+      setStreaming(false)
+    }
+
     leftEs.onmessage = (e) => {
       const event: StreamEvent = JSON.parse(e.data)
       setLeft((prev) => applyEvent(prev, event))
       if (event.type === 'done') {
         setFinalAnswer((prev) => prev ?? event.content ?? null)
         leftEs.close()
+        onDone()
       }
     }
 
@@ -151,11 +165,18 @@ export default function App() {
       if (event.type === 'done') {
         setFinalAnswer((prev) => prev ?? event.content ?? null)
         rightEs.close()
+        onDone()
       }
     }
 
-    leftEs.onerror = () => leftEs.close()
-    rightEs.onerror = () => rightEs.close()
+    leftEs.onerror = () => {
+      leftEs.close()
+      setStreaming(false)
+    }
+    rightEs.onerror = () => {
+      rightEs.close()
+      setStreaming(false)
+    }
 
     return () => {
       leftEs.close()
@@ -164,45 +185,59 @@ export default function App() {
   }, [sessionId])
 
   return (
-    <div className='flex h-screen flex-col gap-3 bg-[#0d0d0d] p-4 font-mono text-[#e0e0e0]'>
-      <div className='text-center'>
+    <div className='flex h-screen flex-col bg-[#2d1b5e] p-8 font-mono text-[#e0e0e0]'>
+      <div className='mb-8 text-center'>
         <h1 className='text-xl font-normal tracking-[0.3em]'>GCN</h1>
-        <p className='mt-1 text-[11px] tracking-[0.15em] text-[#555]'>
+        <p className='mt-2 text-[11px] tracking-[0.15em] text-[#9b7fc7]'>
           Generative Cooperative Network
         </p>
       </div>
-      <div className='flex gap-2'>
-        <input
-          className='flex-1 rounded-sm border border-[#2a2a2a] bg-[#141414] px-3 py-2 font-mono text-sm text-[#e0e0e0] outline-none transition-colors placeholder:text-[#333] focus:border-[#444] disabled:opacity-40'
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder='Ask a question...'
-          disabled={loading}
-        />
-        <button
-          type='button'
-          onClick={handleSubmit}
-          disabled={loading || !question.trim()}
-          className='rounded-sm border border-[#333] bg-[#1a1a1a] px-6 py-2 font-mono text-sm text-[#ccc] tracking-wide transition-colors hover:border-[#555] hover:text-white disabled:cursor-default disabled:opacity-35'
-        >
-          {loading ? '...' : 'Ask'}
-        </button>
-      </div>
-      <div className='flex min-h-0 flex-1 gap-3'>
+      <div className='mb-8 flex min-h-0 flex-1 gap-8'>
         <ChatPanel title='Left Brain — Analytical' state={left} />
         <ChatPanel title='Right Brain — Abstract' state={right} />
       </div>
       {finalAnswer && (
-        <div className='animate-fade-in max-h-[30vh] overflow-y-auto rounded-sm border border-[#1e2e1e] bg-[#0c140c] p-3'>
-          <div className='mb-1 text-[10px] tracking-[0.12em] text-[#3a6e3a] uppercase'>
+        <div className='animate-fade-in mb-8 max-h-[25vh] overflow-y-auto rounded-sm border border-[#6b3fa8] bg-[#3d2075] p-5'>
+          <div className='mb-2 text-[10px] tracking-[0.12em] text-[#a87fd4] uppercase'>
             Final Answer
           </div>
-          <div className='text-[13px] leading-relaxed whitespace-pre-wrap text-[#aaccaa]'>
+          <div className='text-[13px] leading-relaxed whitespace-pre-wrap text-[#c4b5e0]'>
             {finalAnswer}
           </div>
         </div>
       )}
+      <div className='flex items-end gap-4'>
+        <textarea
+          className='flex-1 resize-none rounded-sm border border-[#6b3fa8] bg-[#3d2075] px-4 py-3 font-mono text-sm text-[#e0e0e0] outline-none transition-colors placeholder:text-[#7a5a9e] focus:border-[#a87fd4] disabled:opacity-40'
+          rows={3}
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              handleSubmit()
+            }
+          }}
+          placeholder='Ask a question...'
+          disabled={loading || streaming}
+        />
+        <button
+          type='button'
+          onClick={handleSubmit}
+          disabled={loading || streaming || !question.trim()}
+          className='rounded-sm border border-[#6b3fa8] bg-[#3d2075] px-6 py-3 font-mono text-sm text-[#ccc] tracking-wide transition-colors hover:border-[#a87fd4] hover:text-white disabled:cursor-default disabled:opacity-35'
+        >
+          {loading ? '...' : 'Ask'}
+        </button>
+        <button
+          type='button'
+          onClick={handleAbort}
+          disabled={!streaming}
+          className='rounded-sm border border-[#8b3a3a] bg-[#3d1515] px-6 py-3 font-mono text-sm text-[#e08080] tracking-wide transition-colors hover:border-[#c05050] hover:text-white disabled:cursor-default disabled:opacity-35'
+        >
+          Abort
+        </button>
+      </div>
     </div>
   )
 }

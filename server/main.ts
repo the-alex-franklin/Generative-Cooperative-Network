@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { runGCN } from './lib/gcn.ts'
-import { createSession, getSession, pushEvent, subscribe } from './lib/session.ts'
+import { abortSession, createSession, getSession, pushEvent, subscribe } from './lib/session.ts'
 
 const app = new Hono()
 
@@ -54,6 +54,13 @@ app.get('/api/gcn/stream/:side/:sessionId', (c) => {
         }
       })
     }))
+})
+
+app.post('/api/gcn/abort/:sessionId', (c) => {
+  const session = getSession(c.req.param('sessionId'))
+  if (!session) return c.json({ error: 'session not found' }, 404)
+  abortSession(session)
+  return c.json({ ok: true })
 })
 
 Deno.serve({ port: 8000 }, app.fetch)

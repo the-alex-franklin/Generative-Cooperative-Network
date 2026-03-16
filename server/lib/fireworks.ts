@@ -12,6 +12,7 @@ export interface ChatOptions {
   messages: Message[]
   maxTokens?: number
   temperature?: number
+  signal?: AbortSignal
 }
 
 function headers() {
@@ -26,6 +27,7 @@ export function chat(options: ChatOptions) {
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: headers(),
+      signal: options.signal,
       body: JSON.stringify({
         model: options.model,
         messages: options.messages,
@@ -46,6 +48,7 @@ export async function chatStream(
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: headers(),
+    signal: options.signal,
     body: JSON.stringify({
       model: options.model,
       messages: options.messages,

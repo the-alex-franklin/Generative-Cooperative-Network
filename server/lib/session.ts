@@ -18,6 +18,7 @@ interface SideChannel {
 
 export interface GCNSession {
   id: string
+  abortController: AbortController
   sides: {
     left: SideChannel
     right: SideChannel
@@ -29,6 +30,7 @@ const sessions = new Map<string, GCNSession>()
 export function createSession(id: string): GCNSession {
   const session: GCNSession = {
     id,
+    abortController: new AbortController(),
     sides: {
       left: { buffer: [], subscribers: new Set() },
       right: { buffer: [], subscribers: new Set() },
@@ -42,6 +44,10 @@ export function createSession(id: string): GCNSession {
 
 export function getSession(id: string): GCNSession | undefined {
   return sessions.get(id)
+}
+
+export function abortSession(session: GCNSession) {
+  session.abortController.abort()
 }
 
 export function pushEvent(session: GCNSession, side: 'left' | 'right', event: StreamEvent) {
