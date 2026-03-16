@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import './App.css'
 
 type Round = {
   iteration: number
@@ -60,34 +59,46 @@ function applyEvent(prev: PanelState, event: StreamEvent): PanelState {
   }
 }
 
-function ChatPanel({ title, state }: { title: string; state: PanelState }) {
-  const bottomRef = useRef<HTMLDivElement>(null)
+function roundLabel(round: Round): string {
+  if (round.iteration === 0) return 'Initial'
+  if (round.phase === 'critique') return `Round ${round.iteration} — Critique`
+  return `Round ${round.iteration} — Revision`
+}
 
+function ChatPanel({ title, state }: { title: string; state: PanelState }) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const roundCount = state.rounds.length
+  const lastContent = state.rounds.at(-1)?.content ?? ''
+
+  // Smooth scroll when a new round section appears
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [state.rounds])
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' })
+  }, [roundCount])
+
+  // Instant scroll to keep pace with streaming tokens
+  useEffect(() => {
+    const el = bodyRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lastContent])
 
   return (
-    <div className='chat-panel'>
-      <div className='panel-header'>{title}</div>
-      <div className='panel-body'>
+    <div className='flex flex-1 flex-col overflow-hidden rounded-sm border border-[#1e1e1e]'>
+      <div className='border-b border-[#1e1e1e] bg-[#141414] px-3 py-1.5 font-mono text-[11px] tracking-[0.08em] text-[#666] uppercase'>
+        {title}
+      </div>
+      <div ref={bodyRef} className='flex flex-1 flex-col gap-4 overflow-y-auto p-3'>
         {state.rounds.map((round, i) => (
-          <div key={i} className='round'>
-            <div className='round-label'>
-              {round.iteration === 0
-                ? 'Initial'
-                : round.phase === 'critique'
-                ? `Round ${round.iteration} — Critique`
-                : `Round ${round.iteration} — Revision`}
+          <div key={i} className='animate-fade-in'>
+            <div className='mb-1 font-mono text-[10px] tracking-[0.12em] text-[#444] uppercase'>
+              {roundLabel(round)}
             </div>
-            <div className='round-content'>
+            <div className='font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words text-[#ccc]'>
               {round.content}
-              {!round.complete && <span className='cursor'>▊</span>}
+              {!round.complete && <span className='animate-blink text-[#666]'>▊</span>}
             </div>
           </div>
         ))}
-        {state.error && <div className='error'>{state.error}</div>}
-        <div ref={bottomRef} />
+        {state.error && <div className='font-mono text-[13px] text-[#c06060]'>{state.error}</div>}
       </div>
     </div>
   )
@@ -153,32 +164,43 @@ export default function App() {
   }, [sessionId])
 
   return (
-    <div className='app'>
-      <div className='header'>
-        <h1>GCN</h1>
-        <p className='subtitle'>Generative Cooperative Network</p>
+    <div className='flex h-screen flex-col gap-3 bg-[#0d0d0d] p-4 font-mono text-[#e0e0e0]'>
+      <div className='text-center'>
+        <h1 className='text-xl font-normal tracking-[0.3em]'>GCN</h1>
+        <p className='mt-1 text-[11px] tracking-[0.15em] text-[#555]'>
+          Generative Cooperative Network
+        </p>
       </div>
-      <div className='input-row'>
+      <div className='flex gap-2'>
         <input
-          className='question-input'
+          className='flex-1 rounded-sm border border-[#2a2a2a] bg-[#141414] px-3 py-2 font-mono text-sm text-[#e0e0e0] outline-none transition-colors placeholder:text-[#333] focus:border-[#444] disabled:opacity-40'
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
           placeholder='Ask a question...'
           disabled={loading}
         />
-        <button type='button' onClick={handleSubmit} disabled={loading || !question.trim()}>
+        <button
+          type='button'
+          onClick={handleSubmit}
+          disabled={loading || !question.trim()}
+          className='rounded-sm border border-[#333] bg-[#1a1a1a] px-6 py-2 font-mono text-sm text-[#ccc] tracking-wide transition-colors hover:border-[#555] hover:text-white disabled:cursor-default disabled:opacity-35'
+        >
           {loading ? '...' : 'Ask'}
         </button>
       </div>
-      <div className='panels'>
+      <div className='flex min-h-0 flex-1 gap-3'>
         <ChatPanel title='Left Brain — Analytical' state={left} />
         <ChatPanel title='Right Brain — Abstract' state={right} />
       </div>
       {finalAnswer && (
-        <div className='final-answer'>
-          <div className='final-label'>Final Answer</div>
-          <div className='final-content'>{finalAnswer}</div>
+        <div className='animate-fade-in max-h-[30vh] overflow-y-auto rounded-sm border border-[#1e2e1e] bg-[#0c140c] p-3'>
+          <div className='mb-1 text-[10px] tracking-[0.12em] text-[#3a6e3a] uppercase'>
+            Final Answer
+          </div>
+          <div className='text-[13px] leading-relaxed whitespace-pre-wrap text-[#aaccaa]'>
+            {finalAnswer}
+          </div>
         </div>
       )}
     </div>

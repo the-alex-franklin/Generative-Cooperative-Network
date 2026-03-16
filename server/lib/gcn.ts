@@ -64,13 +64,13 @@ function revisionMessages(
   ]
 }
 
-const CRITIQUE_TOKENS = 200
-const REVISION_DECAY = 0.7
+const CRITIQUE_TOKENS = 300
+const REVISION_DECAY = 0.8
 const REVISION_FLOOR = 220
 
 export function runGCN(session: GCNSession, question: string) {
-  const maxIterations = 2
-  const maxTokens = 768
+  const maxIterations = 6
+  const maxTokens = 1024
   const temperature = 0.8
 
   return Try(async () => {
