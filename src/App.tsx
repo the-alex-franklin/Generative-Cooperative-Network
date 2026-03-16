@@ -112,7 +112,7 @@ export default function App() {
     const res = await fetch('/api/gcn/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, maxIterations: 2, maxTokensPerTurn: 512 }),
+      body: JSON.stringify({ question }),
     })
     const { sessionId: sid } = await res.json()
     setSessionId(sid)

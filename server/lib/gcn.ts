@@ -1,5 +1,6 @@
 import { chat, chatStream, type Message } from './fireworks.ts'
 import { type GCNSession, pushEvent } from './session.ts'
+import { Try } from '../../src/utils/functions/try.ts'
 
 export const MODELS = {
   left: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
@@ -7,19 +8,14 @@ export const MODELS = {
   judge: 'accounts/fireworks/models/llama-v3p1-8b-instruct',
 } as const
 
-export type GCNConfig = {
-  maxIterations?: number
-  maxTokensPerTurn?: number
-  temperature?: number
-}
-
 const PROCESS_BRIEF =
   `You are one of two independent thinkers collaborating to reach the best possible answer to a question. The process works as follows:
 - Round 0: You each generate an independent answer without seeing the other's work.
 - Each subsequent round has two phases:
   Phase 1 (Critique): You are shown your counterpart's answer and asked to critique it — identify weaknesses, gaps, or errors in their reasoning.
   Phase 2 (Revision): You are shown your own previous answer along with your counterpart's critique of it. Revise your answer, incorporating any valid feedback while staying true to your perspective.
-- The goal is not to agree for agreement's sake, but to genuinely improve your answer through honest critique and open-minded revision.`
+- The goal is not to agree for agreement's sake, but to genuinely improve your answer through honest critique and open-minded revision.
+- Be concise and dense. Prioritize signal over length. Do not pad, repeat yourself, or restate things that don't need restating.`
 
 const SYSTEM_LEFT = `${PROCESS_BRIEF}
 
@@ -29,8 +25,11 @@ const SYSTEM_RIGHT = `${PROCESS_BRIEF}
 
 Your role is the abstract thinker. You draw connections across domains, reason by analogy, surface non-obvious angles, and reframe problems creatively. Maintain this perspective even as you incorporate genuine insights from your counterpart.`
 
+const CONVERGENCE_THRESHOLD = 0.80
+const STAGNATION_PATIENCE = 2
+
 const SYSTEM_JUDGE =
-  `You determine whether two answers have substantively converged — meaning they are making the same core points, even if worded differently. Reply with only "yes" or "no".`
+  `Rate how substantively similar two answers are on a scale from 0.00 to 1.00, where 0.00 means completely different and 1.00 means essentially identical in their core claims. Reply with only a decimal to two places, e.g. 0.73.`
 
 const SYSTEM_SYNTHESIZER =
   `You are a neutral synthesizer. Given two answers to the same question — one from an analytical perspective and one from an abstract perspective — produce a single best answer that integrates their strongest points and resolves any contradictions. Be thorough but concise.`
@@ -44,7 +43,7 @@ function critiqueMessages(question: string, counterpartAnswer: string): Message[
     {
       role: 'user',
       content:
-        `The question is: ${question}\n\nYour counterpart has provided the following answer:\n\n---\n${counterpartAnswer}\n---\n\nCritique this answer thoroughly. Identify weaknesses, gaps in reasoning, blind spots, and suggest specific improvements. Be honest and rigorous.`,
+        `The question is: ${question}\n\nYour counterpart answered:\n\n---\n${counterpartAnswer}\n---\n\nIdentify the 2–3 most significant weaknesses in this answer. Be specific and direct. Do not summarize the answer back — just identify the problems.`,
     },
   ]
 }
@@ -60,17 +59,21 @@ function revisionMessages(
     {
       role: 'user',
       content:
-        `Your counterpart has reviewed your answer and provided the following critique and suggestions:\n\n---\n${critiqueOfOwnWork}\n---\n\nRevise your answer, thoughtfully incorporating the valid points from this feedback while staying true to your perspective. Return only your revised answer.`,
+        `Your counterpart has critiqued your answer:\n\n---\n${critiqueOfOwnWork}\n---\n\nRevise your answer. Focus only on what needs to change and why — do not rewrite parts that are already sound. Return only your revised answer.`,
     },
   ]
 }
 
-export async function runGCN(session: GCNSession, question: string, config: GCNConfig = {}) {
-  const maxIterations = config.maxIterations ?? 3
-  const maxTokens = config.maxTokensPerTurn ?? 1024
-  const temperature = config.temperature ?? 0.7
+const CRITIQUE_TOKENS = 200
+const REVISION_DECAY = 0.7
+const REVISION_FLOOR = 220
 
-  try {
+export function runGCN(session: GCNSession, question: string) {
+  const maxIterations = 2
+  const maxTokens = 768
+  const temperature = 0.8
+
+  return Try(async () => {
     // Round 0: independent first pass
     pushEvent(session, 'left', { type: 'round_start', iteration: 0 })
     pushEvent(session, 'right', { type: 'round_start', iteration: 0 })
@@ -101,8 +104,12 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
 
     let currentLeft = leftAnswer
     let currentRight = rightAnswer
+    let lastScore = 0
+    let stagnantRounds = 0
 
     for (let i = 1; i <= maxIterations; i++) {
+      const revisionTokens = Math.max(REVISION_FLOOR, Math.round(maxTokens * REVISION_DECAY ** i))
+
       // Phase 1: each model critiques the other's answer in parallel
       pushEvent(session, 'left', { type: 'round_start', iteration: i, phase: 'critique' })
       pushEvent(session, 'right', { type: 'round_start', iteration: i, phase: 'critique' })
@@ -115,7 +122,7 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
               { role: 'system', content: SYSTEM_LEFT },
               ...critiqueMessages(question, currentRight),
             ],
-            maxTokens,
+            maxTokens: CRITIQUE_TOKENS,
             temperature,
           },
           (token) => pushEvent(session, 'left', { type: 'token', content: token }),
@@ -127,7 +134,7 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
               { role: 'system', content: SYSTEM_RIGHT },
               ...critiqueMessages(question, currentLeft),
             ],
-            maxTokens,
+            maxTokens: CRITIQUE_TOKENS,
             temperature,
           },
           (token) => pushEvent(session, 'right', { type: 'token', content: token }),
@@ -149,7 +156,7 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
               { role: 'system', content: SYSTEM_LEFT },
               ...revisionMessages(question, currentLeft, critiqueOfLeft),
             ],
-            maxTokens,
+            maxTokens: revisionTokens,
             temperature,
           },
           (token) => pushEvent(session, 'left', { type: 'token', content: token }),
@@ -161,7 +168,7 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
               { role: 'system', content: SYSTEM_RIGHT },
               ...revisionMessages(question, currentRight, critiqueOfRight),
             ],
-            maxTokens,
+            maxTokens: revisionTokens,
             temperature,
           },
           (token) => pushEvent(session, 'right', { type: 'token', content: token }),
@@ -174,7 +181,7 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
       currentLeft = newLeft
       currentRight = newRight
 
-      // Neutral lightweight convergence check — neither left nor right
+      // Neutral lightweight convergence check
       const check = await chat({
         model: MODELS.judge,
         messages: [
@@ -188,7 +195,23 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
         temperature: 0,
       })
 
-      if (check.success && check.data.trim().toLowerCase().startsWith('yes')) break
+      if (!check.success) throw new Error(`Judge API failure: ${check.error}`)
+
+      const score = parseFloat(check.data.trim())
+      const validScore = !isNaN(score) && score >= 0 && score <= 1 ? score : null
+
+      if (validScore === null) break // garbage response — abort loop, still synthesize
+
+      if (validScore >= CONVERGENCE_THRESHOLD) break
+
+      if (validScore <= lastScore) {
+        stagnantRounds++
+        if (stagnantRounds >= STAGNATION_PATIENCE) break
+      } else {
+        stagnantRounds = 0
+      }
+
+      lastScore = validScore
     }
 
     // Synthesize using left-brain model
@@ -209,9 +232,5 @@ export async function runGCN(session: GCNSession, question: string, config: GCNC
     const finalAnswer = synthResult.success ? synthResult.data : 'Synthesis failed.'
     pushEvent(session, 'left', { type: 'done', content: finalAnswer })
     pushEvent(session, 'right', { type: 'done', content: finalAnswer })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    pushEvent(session, 'left', { type: 'error', message })
-    pushEvent(session, 'right', { type: 'error', message })
-  }
+  })
 }

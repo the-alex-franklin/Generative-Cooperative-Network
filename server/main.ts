@@ -1,25 +1,28 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import { type GCNConfig, runGCN } from './lib/gcn.ts'
-import { createSession, getSession, subscribe } from './lib/session.ts'
+import { runGCN } from './lib/gcn.ts'
+import { createSession, getSession, pushEvent, subscribe } from './lib/session.ts'
 
 const app = new Hono()
 
 app.get('/api/hello', (c) => c.json({ message: 'Hello from Hono!' }))
 
 app.post('/api/gcn/start', async (c) => {
-  const body = await c.req.json<{ question: string } & GCNConfig>()
+  const body = await c.req.json<{ question: string }>()
   if (!body.question?.trim()) return c.json({ error: 'question is required' }, 400)
 
   const sessionId = crypto.randomUUID()
   const session = createSession(sessionId)
 
   // fire and forget — streams tokens into session channels as they arrive
-  runGCN(session, body.question, {
-    maxIterations: body.maxIterations,
-    maxTokensPerTurn: body.maxTokensPerTurn,
-    temperature: body.temperature,
-  })
+  runGCN(session, body.question)
+    .then((result) => {
+      if (!result.success) {
+        console.error('[GCN error]', result.error)
+        pushEvent(session, 'left', { type: 'error', message: result.error.message })
+        pushEvent(session, 'right', { type: 'error', message: result.error.message })
+      }
+    })
 
   return c.json({ sessionId })
 })
