@@ -1,23 +1,24 @@
-import { chat } from './fireworks.ts';
-import { chatStream as leftChatStream } from './openai.ts';
-import { chatStream as rightChatStream } from './anthropic.ts';
+import {
+  chat as hypervisorChat,
+  chatStream as hypervisorChatStream,
+  chatStream as leftChatStream,
+} from './anthropic.ts';
+import { chatStream as rightChatStream } from './openai.ts';
 import type { Message } from './fireworks.ts';
 import { type GCNSession, pushEvent } from './session.ts';
 import { Try } from '../../src/utils/functions/try.ts';
 
 export const MODELS = {
-  left: 'gpt-4o-mini',
-  right: 'claude-haiku-4-5',
-  judge: 'accounts/fireworks/models/qwen3-8b',
+  left: 'claude-haiku-4-5',
+  right: 'gpt-4o-mini',
+  hypervisor: 'claude-haiku-4-5',
 } as const;
 
 const PROCESS_BRIEF =
   `You are one of two independent thinkers collaborating to reach the best possible answer to a question. The process works as follows:
 - Round 0: You each generate an independent answer without seeing the other's work.
-- Each subsequent round has two phases:
-  Phase 1 (Critique): You are shown your counterpart's answer and asked to constructively critique it — identify weaknesses, gaps, or errors in their reasoning — and suggest improvements with reasoning.
-  Phase 2 (Revision): You are shown your own previous answer along with your counterpart's critique of it. Revise your answer, incorporating any valid feedback while staying true to your perspective.
-- The goal is not to agree for agreement's sake, but to genuinely improve your answer through honest critique and open-minded revision.
+- Each subsequent round: You are shown your counterpart's answer and asked to rewrite it from your own perspective — keep what's sound, fix what's wrong, and bring your distinct viewpoint to bear.
+- Over successive rounds, the two answers should converge toward a single best answer through this process of mutual rewriting.
 - Be concise and dense. Prioritize signal over length. Do not pad, repeat yourself, or restate things that don't need restating.`;
 
 const SYSTEM_LEFT = `${PROCESS_BRIEF}
@@ -31,38 +32,22 @@ Your role is the abstract thinker. You draw connections across domains, reason b
 const CONVERGENCE_THRESHOLD = 0.80;
 const STAGNATION_PATIENCE = 2;
 
-const SYSTEM_JUDGE =
+const SYSTEM_HYPERVISOR =
   `Rate how substantively similar two answers are on a scale from 0.00 to 1.00, where 0.00 means completely different and 1.00 means essentially identical in their core claims. Reply with only a decimal to two places, e.g. 0.73.`;
 
-const SYSTEM_SYNTHESIZER =
-  `You are a neutral synthesizer. Given two answers to the same question — one from an analytical perspective and one from an abstract perspective — produce a single best answer that integrates their strongest points and resolves any contradictions. Be thorough but concise.`;
+const SYSTEM_HYPERVISOR_FINAL =
+  `You are a neutral hypervisor. Given two answers to the same question that have been converging through mutual rewriting, present the single best unified answer they have arrived at. Be thorough but concise.`;
 
 function initialMessages(question: string): Message[] {
   return [{ role: 'user', content: question }];
 }
 
-function critiqueMessages(question: string, counterpartAnswer: string): Message[] {
+function rewriteMessages(question: string, counterpartAnswer: string): Message[] {
   return [
     {
       role: 'user',
       content:
-        `The question is: ${question}\n\nYour counterpart answered:\n\n---\n${counterpartAnswer}\n---\n\nIdentify the 2–3 most significant weaknesses in this answer. Be specific and direct. Do not summarize the answer back — just identify the problems.`,
-    },
-  ];
-}
-
-function revisionMessages(
-  question: string,
-  ownAnswer: string,
-  critiqueOfOwnWork: string,
-): Message[] {
-  return [
-    { role: 'user', content: question },
-    { role: 'assistant', content: ownAnswer },
-    {
-      role: 'user',
-      content:
-        `Your counterpart has critiqued your answer:\n\n---\n${critiqueOfOwnWork}\n---\n\nRevise your answer. Focus only on what needs to change and why — do not rewrite parts that are already sound. Return only your revised answer.`,
+        `The question is: ${question}\n\nYour counterpart answered:\n\n---\n${counterpartAnswer}\n---\n\nRewrite and improve this answer from your own perspective. Keep what's sound, fix what's wrong, and bring your distinct viewpoint to bear. Return only the rewritten answer.`,
     },
   ];
 }
@@ -79,14 +64,10 @@ function finalAnswerMessages(question: string, ownAnswer: string): Message[] {
   ];
 }
 
-const CRITIQUE_TOKENS = 300;
-const REVISION_DECAY = 0.8;
-const REVISION_FLOOR = 220;
-
 export function runGCN(session: GCNSession, question: string) {
-  const maxIterations = 6;
+  const maxIterations = 4;
   const maxTokens = 1024;
-  const temperature = 0.8;
+  const temperature = 0.9;
 
   const signal = session.abortController.signal;
 
@@ -127,21 +108,19 @@ export function runGCN(session: GCNSession, question: string) {
     let stagnantRounds = 0;
 
     for (let i = 1; i <= maxIterations; i++) {
-      const revisionTokens = Math.max(REVISION_FLOOR, Math.round(maxTokens * REVISION_DECAY ** i));
+      // Each model rewrites the other's answer from its own perspective
+      pushEvent(session, 'left', { type: 'round_start', iteration: i });
+      pushEvent(session, 'right', { type: 'round_start', iteration: i });
 
-      // Phase 1: each model critiques the other's answer in parallel
-      pushEvent(session, 'left', { type: 'round_start', iteration: i, phase: 'critique' });
-      pushEvent(session, 'right', { type: 'round_start', iteration: i, phase: 'critique' });
-
-      const [critiqueOfRight, critiqueOfLeft] = await Promise.all([
+      const [rewriteOfRight, rewriteOfLeft] = await Promise.all([
         leftChatStream(
           {
             model: MODELS.left,
             messages: [
               { role: 'system', content: SYSTEM_LEFT },
-              ...critiqueMessages(question, currentRight),
+              ...rewriteMessages(question, currentRight),
             ],
-            maxTokens: CRITIQUE_TOKENS,
+            maxTokens,
             temperature,
             signal,
           },
@@ -152,9 +131,9 @@ export function runGCN(session: GCNSession, question: string) {
             model: MODELS.right,
             messages: [
               { role: 'system', content: SYSTEM_RIGHT },
-              ...critiqueMessages(question, currentLeft),
+              ...rewriteMessages(question, currentLeft),
             ],
-            maxTokens: CRITIQUE_TOKENS,
+            maxTokens,
             temperature,
             signal,
           },
@@ -162,53 +141,18 @@ export function runGCN(session: GCNSession, question: string) {
         ),
       ]);
 
-      pushEvent(session, 'left', { type: 'round_end', iteration: i, phase: 'critique' });
-      pushEvent(session, 'right', { type: 'round_end', iteration: i, phase: 'critique' });
+      pushEvent(session, 'left', { type: 'round_end', iteration: i });
+      pushEvent(session, 'right', { type: 'round_end', iteration: i });
 
-      // Phase 2: each model revises its own answer using the critique it received
-      pushEvent(session, 'left', { type: 'round_start', iteration: i, phase: 'revision' });
-      pushEvent(session, 'right', { type: 'round_start', iteration: i, phase: 'revision' });
-
-      const [newLeft, newRight] = await Promise.all([
-        leftChatStream(
-          {
-            model: MODELS.left,
-            messages: [
-              { role: 'system', content: SYSTEM_LEFT },
-              ...revisionMessages(question, currentLeft, critiqueOfLeft),
-            ],
-            maxTokens: revisionTokens,
-            temperature,
-            signal,
-          },
-          (token) => pushEvent(session, 'left', { type: 'token', content: token }),
-        ),
-        rightChatStream(
-          {
-            model: MODELS.right,
-            messages: [
-              { role: 'system', content: SYSTEM_RIGHT },
-              ...revisionMessages(question, currentRight, critiqueOfRight),
-            ],
-            maxTokens: revisionTokens,
-            temperature,
-            signal,
-          },
-          (token) => pushEvent(session, 'right', { type: 'token', content: token }),
-        ),
-      ]);
-
-      pushEvent(session, 'left', { type: 'round_end', iteration: i, phase: 'revision' });
-      pushEvent(session, 'right', { type: 'round_end', iteration: i, phase: 'revision' });
-
-      currentLeft = newLeft;
-      currentRight = newRight;
+      // Swap: each panel now shows the other model's rewrite of its previous answer
+      currentLeft = rewriteOfRight;
+      currentRight = rewriteOfLeft;
 
       // Neutral lightweight convergence check
-      const check = await chat({
-        model: MODELS.judge,
+      const check = await hypervisorChat({
+        model: MODELS.hypervisor,
         messages: [
-          { role: 'system', content: SYSTEM_JUDGE },
+          { role: 'system', content: SYSTEM_HYPERVISOR },
           {
             role: 'user',
             content: `Answer A:\n${currentLeft}\n\nAnswer B:\n${currentRight}`,
@@ -219,7 +163,7 @@ export function runGCN(session: GCNSession, question: string) {
         signal,
       });
 
-      if (!check.success) throw new Error(`Judge API failure: ${check.error}`);
+      if (!check.success) throw new Error(`Hypervisor API failure: ${check.error.message}`);
 
       // Strip <think>...</think> blocks, then find the first decimal in the response
       const cleaned = check.data.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -242,8 +186,8 @@ export function runGCN(session: GCNSession, question: string) {
     }
 
     // Final answer pass — each model presents their definitive answer after the debate
-    pushEvent(session, 'left', { type: 'round_start', iteration: -1, phase: 'revision' });
-    pushEvent(session, 'right', { type: 'round_start', iteration: -1, phase: 'revision' });
+    pushEvent(session, 'left', { type: 'round_start', iteration: -1 });
+    pushEvent(session, 'right', { type: 'round_start', iteration: -1 });
 
     const [finalLeft, finalRight] = await Promise.all([
       leftChatStream(
@@ -274,30 +218,30 @@ export function runGCN(session: GCNSession, question: string) {
       ),
     ]);
 
-    pushEvent(session, 'left', { type: 'round_end', iteration: -1, phase: 'revision' });
-    pushEvent(session, 'right', { type: 'round_end', iteration: -1, phase: 'revision' });
+    pushEvent(session, 'left', { type: 'round_end', iteration: -1 });
+    pushEvent(session, 'right', { type: 'round_end', iteration: -1 });
 
-    // Synthesize using left-brain model
-    pushEvent(session, 'synthesis', { type: 'round_start', iteration: 0 });
-    await leftChatStream(
+    // Hypervisor final pass
+    pushEvent(session, 'hypervisor', { type: 'round_start', iteration: 0 });
+    await hypervisorChatStream(
       {
-        model: MODELS.left,
+        model: MODELS.hypervisor,
         messages: [
-          { role: 'system', content: SYSTEM_SYNTHESIZER },
+          { role: 'system', content: SYSTEM_HYPERVISOR_FINAL },
           {
             role: 'user',
             content:
-              `Question: ${question}\n\nAnalytical perspective:\n${finalLeft}\n\nAbstract perspective:\n${finalRight}\n\nSynthesize a single best answer.`,
+              `Question: ${question}\n\nAnswer A:\n${finalLeft}\n\nAnswer B:\n${finalRight}\n\nPresent the unified best answer.`,
           },
         ],
         maxTokens,
         temperature: 0.3,
         signal,
       },
-      (token) => pushEvent(session, 'synthesis', { type: 'token', content: token }),
+      (token) => pushEvent(session, 'hypervisor', { type: 'token', content: token }),
     );
-    pushEvent(session, 'synthesis', { type: 'round_end', iteration: 0 });
-    pushEvent(session, 'synthesis', { type: 'done' });
+    pushEvent(session, 'hypervisor', { type: 'round_end', iteration: 0 });
+    pushEvent(session, 'hypervisor', { type: 'done' });
     pushEvent(session, 'left', { type: 'done' });
     pushEvent(session, 'right', { type: 'done' });
   });

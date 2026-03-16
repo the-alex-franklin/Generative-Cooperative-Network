@@ -21,7 +21,7 @@ app.post('/api/gcn/start', async (c) => {
         console.error('[GCN error]', result.error);
         pushEvent(session, 'left', { type: 'error', message: result.error.message });
         pushEvent(session, 'right', { type: 'error', message: result.error.message });
-        pushEvent(session, 'synthesis', { type: 'error', message: result.error.message });
+        pushEvent(session, 'hypervisor', { type: 'error', message: result.error.message });
       }
     });
 
@@ -29,11 +29,11 @@ app.post('/api/gcn/start', async (c) => {
 });
 
 app.get('/api/gcn/stream/:side/:sessionId', (c) => {
-  const side = c.req.param('side') as 'left' | 'right' | 'synthesis';
+  const side = c.req.param('side') as 'left' | 'right' | 'hypervisor';
   const sessionId = c.req.param('sessionId');
 
-  if (side !== 'left' && side !== 'right' && side !== 'synthesis') {
-    return c.json({ error: 'side must be left, right, or synthesis' }, 400);
+  if (side !== 'left' && side !== 'right' && side !== 'hypervisor') {
+    return c.json({ error: 'side must be left, right, or hypervisor' }, 400);
   }
 
   const session = getSession(sessionId);

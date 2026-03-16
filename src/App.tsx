@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 
 type Round = {
   iteration: number;
-  phase: 'initial' | 'critique' | 'revision';
   content: string;
   complete: boolean;
 };
@@ -17,7 +16,6 @@ type StreamEvent = {
   type: 'token' | 'round_start' | 'round_end' | 'done' | 'error';
   content?: string;
   iteration?: number;
-  phase?: 'initial' | 'critique' | 'revision';
   message?: string;
 };
 
@@ -32,7 +30,6 @@ function applyEvent(prev: PanelState, event: StreamEvent): PanelState {
           ...prev.rounds,
           {
             iteration: event.iteration!,
-            phase: event.phase ?? 'initial',
             content: '',
             complete: false,
           },
@@ -62,8 +59,7 @@ function applyEvent(prev: PanelState, event: StreamEvent): PanelState {
 function roundLabel(round: Round): string {
   if (round.iteration === -1) return 'Final Answer';
   if (round.iteration === 0) return 'Initial';
-  if (round.phase === 'critique') return `Round ${round.iteration} — Critique`;
-  return `Round ${round.iteration} — Revision`;
+  return `Round ${round.iteration} — Rewrite`;
 }
 
 function ChatPanel({ title, state }: { title: string; state: PanelState }) {
@@ -112,14 +108,14 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const [left, setLeft] = useState<PanelState>(emptyPanel());
   const [right, setRight] = useState<PanelState>(emptyPanel());
-  const [synthesis, setSynthesis] = useState<PanelState>(emptyPanel());
+  const [hypervisor, setHypervisor] = useState<PanelState>(emptyPanel());
 
   const handleSubmit = async () => {
     if (!question.trim() || loading) return;
     setLoading(true);
     setLeft(emptyPanel());
     setRight(emptyPanel());
-    setSynthesis(emptyPanel());
+    setHypervisor(emptyPanel());
     setSessionId(null);
 
     const res = await fetch('/api/gcn/start', {
@@ -144,7 +140,7 @@ export default function App() {
 
     const leftEs = new EventSource(`/api/gcn/stream/left/${sessionId}`);
     const rightEs = new EventSource(`/api/gcn/stream/right/${sessionId}`);
-    const synthesisEs = new EventSource(`/api/gcn/stream/synthesis/${sessionId}`);
+    const hypervisorEs = new EventSource(`/api/gcn/stream/hypervisor/${sessionId}`);
 
     leftEs.onmessage = (e) => {
       const event: StreamEvent = JSON.parse(e.data);
@@ -158,11 +154,11 @@ export default function App() {
       if (event.type === 'done') rightEs.close();
     };
 
-    synthesisEs.onmessage = (e) => {
+    hypervisorEs.onmessage = (e) => {
       const event: StreamEvent = JSON.parse(e.data);
-      setSynthesis((prev) => applyEvent(prev, event));
+      setHypervisor((prev) => applyEvent(prev, event));
       if (event.type === 'done' || event.type === 'error') {
-        synthesisEs.close();
+        hypervisorEs.close();
         setStreaming(false);
       }
     };
@@ -175,15 +171,15 @@ export default function App() {
       rightEs.close();
       setStreaming(false);
     };
-    synthesisEs.onerror = () => {
-      synthesisEs.close();
+    hypervisorEs.onerror = () => {
+      hypervisorEs.close();
       setStreaming(false);
     };
 
     return () => {
       leftEs.close();
       rightEs.close();
-      synthesisEs.close();
+      hypervisorEs.close();
     };
   }, [sessionId]);
 
@@ -199,8 +195,8 @@ export default function App() {
         <ChatPanel title='Left Brain — Analytical' state={left} />
         <ChatPanel title='Right Brain — Abstract' state={right} />
       </div>
-      <div className='mb-8 h-[28vh] flex-shrink-0'>
-        <ChatPanel title='Synthesis' state={synthesis} />
+      <div className='mb-8 flex h-[28vh] flex-shrink-0 flex-col'>
+        <ChatPanel title='Hypervisor' state={hypervisor} />
       </div>
       <div className='flex items-end gap-4'>
         <textarea

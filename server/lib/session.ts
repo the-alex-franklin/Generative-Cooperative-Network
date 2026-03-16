@@ -1,11 +1,9 @@
 export type StreamEventType = 'token' | 'round_start' | 'round_end' | 'done' | 'error';
-export type StreamPhase = 'initial' | 'critique' | 'revision';
 
 export type StreamEvent = {
   type: StreamEventType;
   content?: string;
   iteration?: number;
-  phase?: StreamPhase;
   message?: string;
 };
 
@@ -22,7 +20,7 @@ export type GCNSession = {
   sides: {
     left: SideChannel;
     right: SideChannel;
-    synthesis: SideChannel;
+    hypervisor: SideChannel;
   };
 };
 
@@ -35,7 +33,7 @@ export function createSession(id: string): GCNSession {
     sides: {
       left: { buffer: [], subscribers: new Set() },
       right: { buffer: [], subscribers: new Set() },
-      synthesis: { buffer: [], subscribers: new Set() },
+      hypervisor: { buffer: [], subscribers: new Set() },
     },
   };
   sessions.set(id, session);
@@ -54,7 +52,7 @@ export function abortSession(session: GCNSession) {
 
 export function pushEvent(
   session: GCNSession,
-  side: 'left' | 'right' | 'synthesis',
+  side: 'left' | 'right' | 'hypervisor',
   event: StreamEvent,
 ) {
   const channel = session.sides[side];
@@ -66,7 +64,7 @@ export function pushEvent(
 
 export function subscribe(
   session: GCNSession,
-  side: 'left' | 'right' | 'synthesis',
+  side: 'left' | 'right' | 'hypervisor',
   onEvent: Subscriber,
 ): () => void {
   const channel = session.sides[side];
