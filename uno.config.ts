@@ -1,4 +1,4 @@
-import { defineConfig, presetWebFonts, presetWind4 } from 'unocss'
+import { defineConfig, presetWebFonts, presetWind4 } from 'unocss';
 
 export default defineConfig({
   presets: [
@@ -30,4 +30,4 @@ export default defineConfig({
       },
     },
   },
-})
+});

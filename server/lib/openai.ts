@@ -1,24 +1,12 @@
 import { Try } from '../../src/utils/functions/try.ts';
 import { env } from '../env.ts';
+import type { ChatOptions } from './fireworks.ts';
 
-const BASE_URL = 'https://api.fireworks.ai/inference/v1';
-
-export interface Message {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface ChatOptions {
-  model: string;
-  messages: Message[];
-  maxTokens?: number;
-  temperature?: number;
-  signal?: AbortSignal;
-}
+const BASE_URL = 'https://api.openai.com/v1';
 
 function headers() {
   return {
-    Authorization: `Bearer ${env.FIREWORKS_API_KEY}`,
+    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
     'Content-Type': 'application/json',
   };
 }
@@ -36,7 +24,7 @@ export function chat(options: ChatOptions) {
         temperature: options.temperature ?? 0.7,
       }),
     });
-    if (!res.ok) throw new Error(`Fireworks ${res.status} [${options.model}]: ${await res.text()}`);
+    if (!res.ok) throw new Error(`OpenAI ${res.status} [${options.model}]: ${await res.text()}`);
     const data = await res.json() as { choices: [{ message: { content: string } }] };
     return data.choices[0].message.content;
   });
@@ -58,7 +46,7 @@ export async function chatStream(
       stream: true,
     }),
   });
-  if (!res.ok) throw new Error(`Fireworks ${res.status} [${options.model}]: ${await res.text()}`);
+  if (!res.ok) throw new Error(`OpenAI ${res.status} [${options.model}]: ${await res.text()}`);
   if (!res.body) throw new Error('No response body');
 
   const reader = res.body.getReader();

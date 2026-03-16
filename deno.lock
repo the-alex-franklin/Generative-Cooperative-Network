@@ -13,7 +13,8 @@
     "npm:react@^19.2.4": "19.2.4",
     "npm:unocss@^66.6.6": "66.6.6_vite@7.3.1__picomatch@4.0.3",
     "npm:vite@*": "7.3.1_picomatch@4.0.3",
-    "npm:vite@^7.3.1": "7.3.1_picomatch@4.0.3"
+    "npm:vite@^7.3.1": "7.3.1_picomatch@4.0.3",
+    "npm:zod@latest": "3.24.2"
   },
   "npm": {
     "@antfu/install-pkg@1.1.0": {
@@ -1132,6 +1133,9 @@
     },
     "webpack-virtual-modules@0.6.2": {
       "integrity": "sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ=="
+    },
+    "zod@3.24.2": {
+      "integrity": "sha512-lY7CDW43ECgW9u1TcT3IoXHflywfVqDYze4waEz812jR/bZ8FHDsl7pFQoSZTz5N+2NqRXs8GBwnAwo3ZNxqhQ=="
     }
   },
   "workspace": {

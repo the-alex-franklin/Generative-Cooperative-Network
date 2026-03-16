@@ -1,27 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react';
 
 type Round = {
-  iteration: number
-  phase: 'initial' | 'critique' | 'revision'
-  content: string
-  complete: boolean
-}
+  iteration: number;
+  phase: 'initial' | 'critique' | 'revision';
+  content: string;
+  complete: boolean;
+};
 
 type PanelState = {
-  rounds: Round[]
-  done: boolean
-  error?: string
-}
+  rounds: Round[];
+  done: boolean;
+  error?: string;
+};
 
 type StreamEvent = {
-  type: 'token' | 'round_start' | 'round_end' | 'done' | 'error'
-  content?: string
-  iteration?: number
-  phase?: 'initial' | 'critique' | 'revision'
-  message?: string
-}
+  type: 'token' | 'round_start' | 'round_end' | 'done' | 'error';
+  content?: string;
+  iteration?: number;
+  phase?: 'initial' | 'critique' | 'revision';
+  message?: string;
+};
 
-const emptyPanel = (): PanelState => ({ rounds: [], done: false })
+const emptyPanel = (): PanelState => ({ rounds: [], done: false });
 
 function applyEvent(prev: PanelState, event: StreamEvent): PanelState {
   switch (event.type) {
@@ -37,49 +37,50 @@ function applyEvent(prev: PanelState, event: StreamEvent): PanelState {
             complete: false,
           },
         ],
-      }
+      };
     case 'token': {
       const rounds = prev.rounds.map((r, i) =>
         i === prev.rounds.length - 1 ? { ...r, content: r.content + (event.content ?? '') } : r
-      )
-      return { ...prev, rounds }
+      );
+      return { ...prev, rounds };
     }
     case 'round_end': {
       const rounds = prev.rounds.map((r, i) =>
         i === prev.rounds.length - 1 ? { ...r, complete: true } : r
-      )
-      return { ...prev, rounds }
+      );
+      return { ...prev, rounds };
     }
     case 'done':
-      return { ...prev, done: true }
+      return { ...prev, done: true };
     case 'error':
-      return { ...prev, done: true, error: event.message }
+      return { ...prev, done: true, error: event.message };
     default:
-      return prev
+      return prev;
   }
 }
 
 function roundLabel(round: Round): string {
-  if (round.iteration === 0) return 'Initial'
-  if (round.phase === 'critique') return `Round ${round.iteration} — Critique`
-  return `Round ${round.iteration} — Revision`
+  if (round.iteration === -1) return 'Final Answer';
+  if (round.iteration === 0) return 'Initial';
+  if (round.phase === 'critique') return `Round ${round.iteration} — Critique`;
+  return `Round ${round.iteration} — Revision`;
 }
 
 function ChatPanel({ title, state }: { title: string; state: PanelState }) {
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const roundCount = state.rounds.length
-  const lastContent = state.rounds.at(-1)?.content ?? ''
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const roundCount = state.rounds.length;
+  const lastContent = state.rounds.at(-1)?.content ?? '';
 
   // Smooth scroll when a new round section appears
   useEffect(() => {
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' })
-  }, [roundCount])
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
+  }, [roundCount]);
 
   // Instant scroll to keep pace with streaming tokens
   useEffect(() => {
-    const el = bodyRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [lastContent])
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lastContent]);
 
   return (
     <div className='flex flex-1 flex-col overflow-hidden rounded-sm border border-[#6b3fa8]'>
@@ -101,88 +102,90 @@ function ChatPanel({ title, state }: { title: string; state: PanelState }) {
         {state.error && <div className='font-mono text-[13px] text-[#c06060]'>{state.error}</div>}
       </div>
     </div>
-  )
+  );
 }
 
 export default function App() {
-  const [question, setQuestion] = useState('')
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [streaming, setStreaming] = useState(false)
-  const [left, setLeft] = useState<PanelState>(emptyPanel())
-  const [right, setRight] = useState<PanelState>(emptyPanel())
-  const [finalAnswer, setFinalAnswer] = useState<string | null>(null)
+  const [question, setQuestion] = useState('');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [left, setLeft] = useState<PanelState>(emptyPanel());
+  const [right, setRight] = useState<PanelState>(emptyPanel());
+  const [synthesis, setSynthesis] = useState<PanelState>(emptyPanel());
 
   const handleSubmit = async () => {
-    if (!question.trim() || loading) return
-    setLoading(true)
-    setLeft(emptyPanel())
-    setRight(emptyPanel())
-    setFinalAnswer(null)
-    setSessionId(null)
+    if (!question.trim() || loading) return;
+    setLoading(true);
+    setLeft(emptyPanel());
+    setRight(emptyPanel());
+    setSynthesis(emptyPanel());
+    setSessionId(null);
 
     const res = await fetch('/api/gcn/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question }),
-    })
-    const { sessionId: sid } = await res.json()
-    setSessionId(sid)
-    setLoading(false)
-    setStreaming(true)
-  }
+    });
+    const { sessionId: sid } = await res.json();
+    setSessionId(sid);
+    setLoading(false);
+    setStreaming(true);
+  };
 
   const handleAbort = async () => {
-    if (!sessionId) return
-    await fetch(`/api/gcn/abort/${sessionId}`, { method: 'POST' })
-    setStreaming(false)
-  }
+    if (!sessionId) return;
+    await fetch(`/api/gcn/abort/${sessionId}`, { method: 'POST' });
+    setStreaming(false);
+  };
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) return;
 
-    const leftEs = new EventSource(`/api/gcn/stream/left/${sessionId}`)
-    const rightEs = new EventSource(`/api/gcn/stream/right/${sessionId}`)
-
-    const onDone = () => {
-      if (!leftEs.CLOSED && !rightEs.CLOSED) return
-      setStreaming(false)
-    }
+    const leftEs = new EventSource(`/api/gcn/stream/left/${sessionId}`);
+    const rightEs = new EventSource(`/api/gcn/stream/right/${sessionId}`);
+    const synthesisEs = new EventSource(`/api/gcn/stream/synthesis/${sessionId}`);
 
     leftEs.onmessage = (e) => {
-      const event: StreamEvent = JSON.parse(e.data)
-      setLeft((prev) => applyEvent(prev, event))
-      if (event.type === 'done') {
-        setFinalAnswer((prev) => prev ?? event.content ?? null)
-        leftEs.close()
-        onDone()
-      }
-    }
+      const event: StreamEvent = JSON.parse(e.data);
+      setLeft((prev) => applyEvent(prev, event));
+      if (event.type === 'done') leftEs.close();
+    };
 
     rightEs.onmessage = (e) => {
-      const event: StreamEvent = JSON.parse(e.data)
-      setRight((prev) => applyEvent(prev, event))
-      if (event.type === 'done') {
-        setFinalAnswer((prev) => prev ?? event.content ?? null)
-        rightEs.close()
-        onDone()
+      const event: StreamEvent = JSON.parse(e.data);
+      setRight((prev) => applyEvent(prev, event));
+      if (event.type === 'done') rightEs.close();
+    };
+
+    synthesisEs.onmessage = (e) => {
+      const event: StreamEvent = JSON.parse(e.data);
+      setSynthesis((prev) => applyEvent(prev, event));
+      if (event.type === 'done' || event.type === 'error') {
+        synthesisEs.close();
+        setStreaming(false);
       }
-    }
+    };
 
     leftEs.onerror = () => {
-      leftEs.close()
-      setStreaming(false)
-    }
+      leftEs.close();
+      setStreaming(false);
+    };
     rightEs.onerror = () => {
-      rightEs.close()
-      setStreaming(false)
-    }
+      rightEs.close();
+      setStreaming(false);
+    };
+    synthesisEs.onerror = () => {
+      synthesisEs.close();
+      setStreaming(false);
+    };
 
     return () => {
-      leftEs.close()
-      rightEs.close()
-    }
-  }, [sessionId])
+      leftEs.close();
+      rightEs.close();
+      synthesisEs.close();
+    };
+  }, [sessionId]);
 
   return (
     <div className='flex h-screen flex-col bg-[#2d1b5e] p-8 font-mono text-[#e0e0e0]'>
@@ -192,20 +195,13 @@ export default function App() {
           Generative Cooperative Network
         </p>
       </div>
-      <div className='mb-8 flex min-h-0 flex-1 gap-8'>
+      <div className='mb-4 flex min-h-0 flex-1 gap-8'>
         <ChatPanel title='Left Brain — Analytical' state={left} />
         <ChatPanel title='Right Brain — Abstract' state={right} />
       </div>
-      {finalAnswer && (
-        <div className='animate-fade-in mb-8 max-h-[25vh] overflow-y-auto rounded-sm border border-[#6b3fa8] bg-[#3d2075] p-5'>
-          <div className='mb-2 text-[10px] tracking-[0.12em] text-[#a87fd4] uppercase'>
-            Final Answer
-          </div>
-          <div className='text-[13px] leading-relaxed whitespace-pre-wrap text-[#c4b5e0]'>
-            {finalAnswer}
-          </div>
-        </div>
-      )}
+      <div className='mb-8 h-[28vh] flex-shrink-0'>
+        <ChatPanel title='Synthesis' state={synthesis} />
+      </div>
       <div className='flex items-end gap-4'>
         <textarea
           className='flex-1 resize-none rounded-sm border border-[#6b3fa8] bg-[#3d2075] px-4 py-3 font-mono text-sm text-[#e0e0e0] outline-none transition-colors placeholder:text-[#7a5a9e] focus:border-[#a87fd4] disabled:opacity-40'
@@ -214,8 +210,8 @@ export default function App() {
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              handleSubmit()
+              e.preventDefault();
+              handleSubmit();
             }
           }}
           placeholder='Ask a question...'
@@ -239,5 +235,5 @@ export default function App() {
         </button>
       </div>
     </div>
-  )
+  );
 }

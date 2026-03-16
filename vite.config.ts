@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite'
-import deno from '@deno/vite-plugin'
-import react from '@vitejs/plugin-react-swc'
-import UnoCSS from 'unocss/vite'
+import { defineConfig } from 'vite';
+import deno from '@deno/vite-plugin';
+import react from '@vitejs/plugin-react-swc';
+import UnoCSS from 'unocss/vite';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,4 +11,4 @@ export default defineConfig({
       '/api': 'http://localhost:8000',
     },
   },
-})
+});
