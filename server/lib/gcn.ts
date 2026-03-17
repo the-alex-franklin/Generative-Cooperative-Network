@@ -17,8 +17,7 @@ export const MODELS = {
 const PROCESS_BRIEF =
   `You are one of two independent thinkers collaborating to reach the best possible answer to a question. The process works as follows:
 - Round 0: You each generate an independent answer without seeing the other's work.
-- Each subsequent round: You are shown your counterpart's answer and asked to rewrite it from your own perspective — keep what's sound, fix what's wrong, and bring your distinct viewpoint to bear.
-- Over successive rounds, the two answers should converge toward a single best answer through this process of mutual rewriting.
+- Each subsequent round: You are shown your counterpart's latest answer. Identify their 1-2 strongest points you hadn't considered, incorporate them if valid, and sharpen your own position in response. Do not wholesale rewrite — evolve your answer incrementally.
 - Be concise and dense. Prioritize signal over length. Do not pad, repeat yourself, or restate things that don't need restating.`;
 
 const SYSTEM_LEFT = `${PROCESS_BRIEF}
@@ -31,6 +30,7 @@ Your role is the abstract thinker. You draw connections across domains, reason b
 
 const CONVERGENCE_THRESHOLD = 0.80;
 const STAGNATION_PATIENCE = 2;
+const MICRO_TURNS = 3; // short exchanges per rewrite round
 
 const SYSTEM_HYPERVISOR =
   `Rate how much these two answers agree on their core conclusion on a scale from 0.00 to 1.00, where 0.00 means they reach opposite or incompatible conclusions and 1.00 means they reach the same conclusion. Ignore stylistic differences — focus only on whether the central claims are compatible. Reply with only a decimal to two places, e.g. 0.73.`;
@@ -46,28 +46,6 @@ Do not say "Answer A says X and Answer B says Y." Make a call. Be thorough but c
 
 function initialMessages(question: string): Message[] {
   return [{ role: 'user', content: question }];
-}
-
-function rewriteMessages(question: string, counterpartAnswer: string): Message[] {
-  return [
-    {
-      role: 'user',
-      content:
-        `The question is: ${question}\n\nYour counterpart answered:\n\n---\n${counterpartAnswer}\n---\n\nRewrite and improve this answer from your own perspective. Keep what's sound, fix what's wrong, and bring your distinct viewpoint to bear. Return only the rewritten answer.`,
-    },
-  ];
-}
-
-function finalAnswerMessages(question: string, ownAnswer: string): Message[] {
-  return [
-    { role: 'user', content: question },
-    { role: 'assistant', content: ownAnswer },
-    {
-      role: 'user',
-      content:
-        `The debate is over. Based on everything you've argued and revised, present your definitive Final Answer to the question. Be complete and clear.`,
-    },
-  ];
 }
 
 export function runGCN(
@@ -122,6 +100,16 @@ export function runGCN(
     pushEvent(session, 'left', { type: 'round_end', iteration: 0 });
     pushEvent(session, 'right', { type: 'round_end', iteration: 0 });
 
+    // Initialize conversation histories from round 0
+    const leftHistory: Message[] = [
+      { role: 'user', content: question },
+      { role: 'assistant', content: leftAnswer },
+    ];
+    const rightHistory: Message[] = [
+      { role: 'user', content: question },
+      { role: 'assistant', content: rightAnswer },
+    ];
+
     let currentLeft = leftAnswer;
     let currentRight = rightAnswer;
     let lastScore = 0;
@@ -153,50 +141,57 @@ export function runGCN(
       }
     }
 
+    // Each micro-turn gets an equal share of maxTokens, capped at 512
+    const microTokens = Math.min(512, Math.max(128, Math.floor(maxTokens / MICRO_TURNS)));
+
     for (let i = 1; !converged && i <= maxIterations; i++) {
-      // Each model rewrites the other's answer from its own perspective
       pushEvent(session, 'left', { type: 'round_start', iteration: i });
       pushEvent(session, 'right', { type: 'round_start', iteration: i });
 
-      const [rewriteOfRight, rewriteOfLeft] = await Promise.all([
-        leftChatStream(
-          {
-            model: MODELS.left,
-            messages: [
-              { role: 'system', content: SYSTEM_LEFT },
-              ...rewriteMessages(question, currentRight),
-            ],
-            maxTokens,
-            temperature,
-            apiKey: anthropicKey,
-            signal,
-          },
-          (token) => pushEvent(session, 'left', { type: 'token', content: token }),
-        ),
-        rightChatStream(
-          {
-            model: MODELS.right,
-            messages: [
-              { role: 'system', content: SYSTEM_RIGHT },
-              ...rewriteMessages(question, currentLeft),
-            ],
-            maxTokens,
-            temperature,
-            apiKey: openaiKey,
-            signal,
-          },
-          (token) => pushEvent(session, 'right', { type: 'token', content: token }),
-        ),
-      ]);
+      for (let k = 0; k < MICRO_TURNS; k++) {
+        const leftMsg =
+          `Your counterpart's latest:\n\n---\n${currentRight}\n---\n\nRespond concisely: absorb what's valid, rebut what's wrong, sharpen your position.`;
+        const rightMsg =
+          `Your counterpart's latest:\n\n---\n${currentLeft}\n---\n\nRespond concisely: absorb what's valid, rebut what's wrong, sharpen your position.`;
+
+        leftHistory.push({ role: 'user', content: leftMsg });
+        rightHistory.push({ role: 'user', content: rightMsg });
+
+        const [newLeft, newRight] = await Promise.all([
+          leftChatStream(
+            {
+              model: MODELS.left,
+              messages: [{ role: 'system', content: SYSTEM_LEFT }, ...leftHistory],
+              maxTokens: microTokens,
+              temperature,
+              apiKey: anthropicKey,
+              signal,
+            },
+            (token) => pushEvent(session, 'left', { type: 'token', content: token }),
+          ),
+          rightChatStream(
+            {
+              model: MODELS.right,
+              messages: [{ role: 'system', content: SYSTEM_RIGHT }, ...rightHistory],
+              maxTokens: microTokens,
+              temperature,
+              apiKey: openaiKey,
+              signal,
+            },
+            (token) => pushEvent(session, 'right', { type: 'token', content: token }),
+          ),
+        ]);
+
+        leftHistory.push({ role: 'assistant', content: newLeft });
+        rightHistory.push({ role: 'assistant', content: newRight });
+        currentLeft = newLeft;
+        currentRight = newRight;
+      }
 
       pushEvent(session, 'left', { type: 'round_end', iteration: i });
       pushEvent(session, 'right', { type: 'round_end', iteration: i });
 
-      // Swap: each panel now shows the other model's rewrite of its previous answer
-      currentLeft = rewriteOfRight;
-      currentRight = rewriteOfLeft;
-
-      // Neutral lightweight convergence check
+      // Convergence check on final micro-turn outputs
       const check = await hypervisorChat({
         model: MODELS.hypervisor,
         messages: [
@@ -214,13 +209,12 @@ export function runGCN(
 
       if (!check.success) throw new Error(`Hypervisor API failure: ${check.error.message}`);
 
-      // Strip <think>...</think> blocks, then find the first decimal in the response
       const cleaned = check.data.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       const match = cleaned.match(/\d+\.\d+|\d+/);
       const score = match ? parseFloat(match[0]) : NaN;
       const validScore = !isNaN(score) && score >= 0 && score <= 1 ? score : null;
 
-      if (validScore === null) break; // garbage response — abort loop, still synthesize
+      if (validScore === null) break;
 
       pushEvent(session, 'hypervisor', { type: 'convergence', score: validScore });
 
@@ -239,18 +233,20 @@ export function runGCN(
       lastScore = validScore;
     }
 
-    // Final answer pass — each model presents their definitive answer after the debate
+    // Final answer pass — each model draws on its full history
     pushEvent(session, 'left', { type: 'round_start', iteration: -1 });
     pushEvent(session, 'right', { type: 'round_start', iteration: -1 });
+
+    const finalPrompt =
+      `The debate is over. Based on everything you've argued, present your definitive Final Answer to the question. Be complete and clear.`;
+    leftHistory.push({ role: 'user', content: finalPrompt });
+    rightHistory.push({ role: 'user', content: finalPrompt });
 
     const [finalLeft, finalRight] = await Promise.all([
       leftChatStream(
         {
           model: MODELS.left,
-          messages: [
-            { role: 'system', content: SYSTEM_LEFT },
-            ...finalAnswerMessages(question, currentLeft),
-          ],
+          messages: [{ role: 'system', content: SYSTEM_LEFT }, ...leftHistory],
           maxTokens,
           temperature: 0.3,
           apiKey: anthropicKey,
@@ -261,10 +257,7 @@ export function runGCN(
       rightChatStream(
         {
           model: MODELS.right,
-          messages: [
-            { role: 'system', content: SYSTEM_RIGHT },
-            ...finalAnswerMessages(question, currentRight),
-          ],
+          messages: [{ role: 'system', content: SYSTEM_RIGHT }, ...rightHistory],
           maxTokens,
           temperature: 0.3,
           apiKey: openaiKey,
