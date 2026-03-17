@@ -4,18 +4,20 @@ import type { ChatOptions } from './fireworks.ts';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
-function headers() {
+function headers(apiKey: string) {
   return {
-    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
   };
 }
 
 export function chat(options: ChatOptions) {
   return Try(async () => {
+    const apiKey = options.apiKey ?? env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('No OpenAI API key provided');
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(apiKey),
       signal: options.signal,
       body: JSON.stringify({
         model: options.model,
@@ -34,9 +36,11 @@ export async function chatStream(
   options: ChatOptions,
   onToken: (token: string) => void,
 ): Promise<string> {
+  const apiKey = options.apiKey ?? env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('No OpenAI API key provided');
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(apiKey),
     signal: options.signal,
     body: JSON.stringify({
       model: options.model,

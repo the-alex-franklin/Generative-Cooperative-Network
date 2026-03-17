@@ -1,9 +1,9 @@
+import { chatStream as leftChatStream } from './anthropic.ts';
 import {
   chat as hypervisorChat,
   chatStream as hypervisorChatStream,
-  chatStream as leftChatStream,
-} from './anthropic.ts';
-import { chatStream as rightChatStream } from './openai.ts';
+  chatStream as rightChatStream,
+} from './openai.ts';
 import type { Message } from './fireworks.ts';
 import { type GCNSession, pushEvent } from './session.ts';
 import { Try } from '../../src/utils/functions/try.ts';
@@ -11,7 +11,7 @@ import { Try } from '../../src/utils/functions/try.ts';
 export const MODELS = {
   left: 'claude-haiku-4-5',
   right: 'gpt-4o-mini',
-  hypervisor: 'claude-haiku-4-5',
+  hypervisor: 'gpt-4o-mini',
 } as const;
 
 const PROCESS_BRIEF =
@@ -33,10 +33,16 @@ const CONVERGENCE_THRESHOLD = 0.80;
 const STAGNATION_PATIENCE = 2;
 
 const SYSTEM_HYPERVISOR =
-  `Rate how substantively similar two answers are on a scale from 0.00 to 1.00, where 0.00 means completely different and 1.00 means essentially identical in their core claims. Reply with only a decimal to two places, e.g. 0.73.`;
+  `Rate how much these two answers agree on their core conclusion on a scale from 0.00 to 1.00, where 0.00 means they reach opposite or incompatible conclusions and 1.00 means they reach the same conclusion. Ignore stylistic differences — focus only on whether the central claims are compatible. Reply with only a decimal to two places, e.g. 0.73.`;
 
 const SYSTEM_HYPERVISOR_FINAL =
-  `You are a neutral hypervisor. Given two answers to the same question that have been converging through mutual rewriting, present the single best unified answer they have arrived at. Be thorough but concise.`;
+  `You are a neutral hypervisor synthesizing the output of two thinkers who have debated the same question over multiple rounds. Your job is to deliver one definitive answer — not a list of both answers.
+
+- If they agree: present the shared conclusion directly.
+- If they partially agree: identify the common ground, resolve the remaining difference with your own judgment, and explain your reasoning briefly.
+- If they genuinely disagree: pick the better-supported position, state why the other falls short, and give the final answer clearly.
+
+Do not say "Answer A says X and Answer B says Y." Make a call. Be thorough but concise.`;
 
 function initialMessages(question: string): Message[] {
   return [{ role: 'user', content: question }];
@@ -64,12 +70,24 @@ function finalAnswerMessages(question: string, ownAnswer: string): Message[] {
   ];
 }
 
-export function runGCN(session: GCNSession, question: string) {
-  const maxIterations = 4;
-  const maxTokens = 1024;
-  const temperature = 0.9;
+export function runGCN(
+  session: GCNSession,
+  question: string,
+  config: {
+    maxIterations?: number;
+    maxTokens?: number;
+    temperature?: number;
+    convergenceThreshold?: number;
+  } = {},
+) {
+  const maxIterations = Math.min(Math.max(config.maxIterations ?? 4, 0), 10);
+  const maxTokens = Math.min(Math.max(config.maxTokens ?? 1024, 128), 4096);
+  const temperature = Math.min(Math.max(config.temperature ?? 0.9, 0), 2);
+  const convergenceThreshold = config.convergenceThreshold ?? CONVERGENCE_THRESHOLD;
 
   const signal = session.abortController.signal;
+  const anthropicKey = session.keys.anthropic;
+  const openaiKey = session.keys.openai;
 
   return Try(async () => {
     // Round 0: independent first pass
@@ -83,6 +101,7 @@ export function runGCN(session: GCNSession, question: string) {
           messages: [{ role: 'system', content: SYSTEM_LEFT }, ...initialMessages(question)],
           maxTokens,
           temperature,
+          apiKey: anthropicKey,
           signal,
         },
         (token) => pushEvent(session, 'left', { type: 'token', content: token }),
@@ -93,6 +112,7 @@ export function runGCN(session: GCNSession, question: string) {
           messages: [{ role: 'system', content: SYSTEM_RIGHT }, ...initialMessages(question)],
           maxTokens,
           temperature,
+          apiKey: openaiKey,
           signal,
         },
         (token) => pushEvent(session, 'right', { type: 'token', content: token }),
@@ -106,8 +126,34 @@ export function runGCN(session: GCNSession, question: string) {
     let currentRight = rightAnswer;
     let lastScore = 0;
     let stagnantRounds = 0;
+    let converged = false;
 
-    for (let i = 1; i <= maxIterations; i++) {
+    // Convergence check between round 0 and round 1
+    {
+      const check = await hypervisorChat({
+        model: MODELS.hypervisor,
+        messages: [
+          { role: 'system', content: SYSTEM_HYPERVISOR },
+          { role: 'user', content: `Answer A:\n${currentLeft}\n\nAnswer B:\n${currentRight}` },
+        ],
+        maxTokens: 512,
+        temperature: 0,
+        apiKey: openaiKey,
+        signal,
+      });
+      if (check.success) {
+        const cleaned = check.data.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        const match = cleaned.match(/\d+\.\d+|\d+/);
+        const score = match ? parseFloat(match[0]) : NaN;
+        if (!isNaN(score) && score >= 0 && score <= 1) {
+          lastScore = score;
+          pushEvent(session, 'hypervisor', { type: 'convergence', score });
+          if (score >= convergenceThreshold) converged = true;
+        }
+      }
+    }
+
+    for (let i = 1; !converged && i <= maxIterations; i++) {
       // Each model rewrites the other's answer from its own perspective
       pushEvent(session, 'left', { type: 'round_start', iteration: i });
       pushEvent(session, 'right', { type: 'round_start', iteration: i });
@@ -122,6 +168,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens,
             temperature,
+            apiKey: anthropicKey,
             signal,
           },
           (token) => pushEvent(session, 'left', { type: 'token', content: token }),
@@ -135,6 +182,7 @@ export function runGCN(session: GCNSession, question: string) {
             ],
             maxTokens,
             temperature,
+            apiKey: openaiKey,
             signal,
           },
           (token) => pushEvent(session, 'right', { type: 'token', content: token }),
@@ -160,6 +208,7 @@ export function runGCN(session: GCNSession, question: string) {
         ],
         maxTokens: 512,
         temperature: 0,
+        apiKey: openaiKey,
         signal,
       });
 
@@ -173,7 +222,12 @@ export function runGCN(session: GCNSession, question: string) {
 
       if (validScore === null) break; // garbage response — abort loop, still synthesize
 
-      if (validScore >= CONVERGENCE_THRESHOLD) break;
+      pushEvent(session, 'hypervisor', { type: 'convergence', score: validScore });
+
+      if (validScore >= convergenceThreshold) {
+        converged = true;
+        break;
+      }
 
       if (validScore <= lastScore) {
         stagnantRounds++;
@@ -199,6 +253,7 @@ export function runGCN(session: GCNSession, question: string) {
           ],
           maxTokens,
           temperature: 0.3,
+          apiKey: anthropicKey,
           signal,
         },
         (token) => pushEvent(session, 'left', { type: 'token', content: token }),
@@ -212,6 +267,7 @@ export function runGCN(session: GCNSession, question: string) {
           ],
           maxTokens,
           temperature: 0.3,
+          apiKey: openaiKey,
           signal,
         },
         (token) => pushEvent(session, 'right', { type: 'token', content: token }),
@@ -236,6 +292,7 @@ export function runGCN(session: GCNSession, question: string) {
         ],
         maxTokens,
         temperature: 0.3,
+        apiKey: openaiKey,
         signal,
       },
       (token) => pushEvent(session, 'hypervisor', { type: 'token', content: token }),

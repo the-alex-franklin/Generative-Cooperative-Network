@@ -14,11 +14,12 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   signal?: AbortSignal;
+  apiKey?: string;
 }
 
 function headers() {
   return {
-    Authorization: `Bearer ${env.FIREWORKS_API_KEY}`,
+    // Authorization: `Bearer ${env.FIREWORKS_API_KEY}`,
     'Content-Type': 'application/json',
   };
 }

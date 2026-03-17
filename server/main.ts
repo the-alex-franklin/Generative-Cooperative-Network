@@ -8,14 +8,30 @@ const app = new Hono();
 app.get('/api/hello', (c) => c.json({ message: 'Hello from Hono!' }));
 
 app.post('/api/gcn/start', async (c) => {
-  const body = await c.req.json<{ question: string }>();
+  const body = await c.req.json<{
+    question: string;
+    anthropicKey?: string;
+    openaiKey?: string;
+    maxIterations?: number;
+    maxTokens?: number;
+    temperature?: number;
+    convergenceThreshold?: number;
+  }>();
   if (!body.question?.trim()) return c.json({ error: 'question is required' }, 400);
 
   const sessionId = crypto.randomUUID();
-  const session = createSession(sessionId);
+  const session = createSession(sessionId, {
+    anthropic: body.anthropicKey?.trim() || undefined,
+    openai: body.openaiKey?.trim() || undefined,
+  });
 
   // fire and forget — streams tokens into session channels as they arrive
-  runGCN(session, body.question)
+  runGCN(session, body.question, {
+    maxIterations: body.maxIterations,
+    maxTokens: body.maxTokens,
+    temperature: body.temperature,
+    convergenceThreshold: body.convergenceThreshold,
+  })
     .then((result) => {
       if (!result.success) {
         console.error('[GCN error]', result.error);

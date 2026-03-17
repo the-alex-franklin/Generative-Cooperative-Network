@@ -4,9 +4,9 @@ import type { ChatOptions, Message } from './fireworks.ts';
 
 const BASE_URL = 'https://api.anthropic.com/v1';
 
-function headers() {
+function headers(apiKey: string) {
   return {
-    'x-api-key': env.ANTHROPIC_API_KEY,
+    'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
     'content-type': 'application/json',
   };
@@ -22,6 +22,8 @@ function extractSystem(messages: Message[]): { system?: string; messages: Messag
 
 export function chat(options: ChatOptions) {
   return Try(async () => {
+    const apiKey = options.apiKey ?? env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('No Anthropic API key provided');
     const { system, messages } = extractSystem(options.messages);
     const body: Record<string, unknown> = {
       model: options.model,
@@ -33,7 +35,7 @@ export function chat(options: ChatOptions) {
 
     const res = await fetch(`${BASE_URL}/messages`, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(apiKey),
       signal: options.signal,
       body: JSON.stringify(body),
     });
@@ -47,6 +49,8 @@ export async function chatStream(
   options: ChatOptions,
   onToken: (token: string) => void,
 ): Promise<string> {
+  const apiKey = options.apiKey ?? env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No Anthropic API key provided');
   const { system, messages } = extractSystem(options.messages);
   const body: Record<string, unknown> = {
     model: options.model,
@@ -59,7 +63,7 @@ export async function chatStream(
 
   const res = await fetch(`${BASE_URL}/messages`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(apiKey),
     signal: options.signal,
     body: JSON.stringify(body),
   });

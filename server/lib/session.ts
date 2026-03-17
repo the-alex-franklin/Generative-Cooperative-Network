@@ -1,9 +1,16 @@
-export type StreamEventType = 'token' | 'round_start' | 'round_end' | 'done' | 'error';
+export type StreamEventType =
+  | 'token'
+  | 'round_start'
+  | 'round_end'
+  | 'done'
+  | 'error'
+  | 'convergence';
 
 export type StreamEvent = {
   type: StreamEventType;
   content?: string;
   iteration?: number;
+  score?: number;
   message?: string;
 };
 
@@ -17,6 +24,7 @@ interface SideChannel {
 export type GCNSession = {
   id: string;
   abortController: AbortController;
+  keys: { anthropic?: string; openai?: string };
   sides: {
     left: SideChannel;
     right: SideChannel;
@@ -26,10 +34,14 @@ export type GCNSession = {
 
 const sessions = new Map<string, GCNSession>();
 
-export function createSession(id: string): GCNSession {
+export function createSession(
+  id: string,
+  keys: { anthropic?: string; openai?: string } = {},
+): GCNSession {
   const session: GCNSession = {
     id,
     abortController: new AbortController(),
+    keys,
     sides: {
       left: { buffer: [], subscribers: new Set() },
       right: { buffer: [], subscribers: new Set() },
