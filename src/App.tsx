@@ -205,7 +205,7 @@ export default function App() {
   }, [sessionId]);
 
   return (
-    <div className='flex h-screen flex-col bg-[#2d1b5e] p-8 font-mono text-[#e0e0e0]'>
+    <div className='flex h-screen flex-col bg-[#2d1b5e] p-8 font-mono text-[#e0e0e0] overflow-scroll'>
       <div className='mb-8 text-center'>
         <h1 className='font-normal text-[32px] tracking-[0.3em]'>GCN</h1>
         <p className='mt-2 text-[24px] tracking-[0.15em] text-[#9b7fc7]'>

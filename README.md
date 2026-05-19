@@ -34,7 +34,6 @@ cp .env.example .env
 deno task api   # API server on :8000
 deno task dev   # Vite dev server on :5173
 ```
-```
 
 ## Deploy
 
